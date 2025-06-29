@@ -1,0 +1,76 @@
+name: Backend CI/CD
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'apps/api/**'
+      - 'packages/db/**'
+      - 'packages/types/**'
+      - 'infra/aws/**'
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1 # Replace with your target AWS region
+  ECR_REPOSITORY: resumate-ai-backend
+  ECS_SERVICE: resumate-ai-backend-service
+  ECS_CLUSTER: resumate-ai-cluster
+  ECS_TASK_DEFINITION: resumate-ai-backend-task
+  CONTAINER_NAME: backend-container
+
+jobs:
+  build-and-deploy:
+    name: Build, Push, and Deploy Backend
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+
+    - name: Install Yarn and dependencies
+      run: |
+        npm install -g yarn
+        yarn install --immutable
+
+    - name: Build backend Docker image
+      working-directory: apps/api
+      run: |
+        docker build -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }} .
+
+    - name: Push backend Docker image to ECR
+      run: |
+        docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+
+    - name: Fill in the new image ID in the ECS task definition
+      id: render-task-definition
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: infra/aws/ecs-backend-task-definition.json # You'd generate this from Terraform outputs or manage it here.
+        container-name: ${{ env.CONTAINER_NAME }}
+        image: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+
+    - name: Deploy Amazon ECS task definition
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      with:
+        task-definition: ${{ steps.render-task-definition.outputs.task-definition }}
+        service: ${{ env.ECS_SERVICE }}
+        cluster: ${{ env.ECS_CLUSTER }}
+        wait-for-service-stability: true
