@@ -1,0 +1,48 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/@prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String    @id @default(uuid())
+  email     String    @unique
+  password  String
+  name      String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  resumes   Resume[]
+}
+
+model Template {
+  id        String    @id @default(uuid())
+  name      String    @unique
+  imageUrl  String? // Thumbnail for the template
+  content   String    @db.Text // HTML or JSON structure of the template
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  resumes   Resume[]
+}
+
+model Resume {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  templateId String
+  template  Template  @relation(fields: [templateId], references: [id])
+  data      Json      // JSON blob of resume data (experience, education, skills, etc.)
+  pdfUrl    String?   // URL to the generated PDF in S3
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([userId, id]) // A user's resume should be uniquely identified by their ID and the resume's ID
+  @@index([userId])
+  @@index([templateId])
+}
